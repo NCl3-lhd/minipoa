@@ -1,10 +1,10 @@
-# Minipoa: A minimizer-based method for fast and memory-efficient partial order alignment
+# Fast and memory efficient partial order alignment with minipoa
 
 [![Downloads](https://anaconda.org/malab/minipoa/badges/downloads.svg)](https://anaconda.org/malab/minipoa)
 [![License](https://anaconda.org/malab/minipoa/badges/license.svg)](https://anaconda.org/malab/minipoa)
 [![Platforms](https://anaconda.org/malab/minipoa/badges/platforms.svg)](https://anaconda.org/malab/minipoa)
 
-[Minipoa: A minimizer-based method for fast and memory-efficient partial order alignment.](https://doi.org/10.64898/2026.02.18.706716)
+[Fast and memory efficient partial order alignment with minipoa.](https://doi.org/10.1101/gr.282046.126)
 
 ## Install
 
