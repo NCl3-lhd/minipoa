@@ -15,7 +15,7 @@ inline int calj(int acj, int Bs) {
   return  acj - Bs * simd_width;
 }
 
-std::vector<res_t> poa(const para_t *para, const graph *DAG, int beg_id, int end_id, int qid, const char *qseq, int qlen, aligned_buff_t *mpool, bool ab_band) {
+std::vector<res_t> poa(const para_t *para, const graph *DAG, int beg_id, int end_id, int qid, const char *qseq, int qlen, aligned_buff_t *mpool, bool ab_band, int band_b) {
 
   // Timer::instance().start("init");
   std::chrono::microseconds total_part1(0);
@@ -44,7 +44,7 @@ std::vector<res_t> poa(const para_t *para, const graph *DAG, int beg_id, int end
   std::vector<int> Bs(n), Be(n);  // index is rank    [Bs[i], Be[i]) 
   std::vector<int> Mp(n), Sl(n), Pl(n, m), Pr(n), Ol(n), Or(n), Ow(n);  // index is rank
   size_t mtx_size = 0;
-  int w = para->b;
+  int w = band_b >= 0 ? band_b : para->b;  // band_b < 0 时使用 -b
   if (para->f) w += m / para->f;
 
   std::vector<int> hlen(n, NEG_INF), tlen(n, NEG_INF);
@@ -565,11 +565,11 @@ std::vector<res_t> alignment(const para_t *para, graph *DAG, minimizer_t *mm, in
   if (!DAG->is_topsorted) DAG->topsort(para, 0);
 
   if (para->verbose >= 2) std::cerr << "collect_anchors_bycons" << "\n";
-  mm128_v anchors = mm->collect_anchors_bytseq(para, rid, qseq, qlen, mm->seqs_size, DAG->cons.c_str(), DAG->cons.size()); // tseq is cons
+  std::vector<bool> win_ab;  // win_ab[i]：第 i 个窗口是否用自适应带，静态窗口带宽用 --win-band 代替 -b
+  mm128_v anchors = mm->collect_anchors_bytseq(para, rid, qseq, qlen, mm->seqs_size, DAG->cons.c_str(), DAG->cons.size(), &win_ab); // tseq is cons
   // no chain
-  bool ab_band = 1;
   if (anchors.n <= 0) {
-    return poa(para, DAG, 0, 1, rid, tseq.c_str(), tseq.size(), mpool, ab_band);
+    return poa(para, DAG, 0, 1, rid, tseq.c_str(), tseq.size(), mpool, true);
     // return abPOA(para, DAG, mm, rid, tseq, mpool);
   }
   if (para->thread <= 1) {
@@ -582,7 +582,8 @@ std::vector<res_t> alignment(const para_t *para, graph *DAG, minimizer_t *mm, in
       end_tpos = xi - q_span + 1, end_qpos = yi - q_span + 1;
       end_id = DAG->cons_pos_to_id[end_tpos];
       int qlen = end_qpos - beg_qpos;
-      std::vector<res_t> t_res = poa(para, DAG, beg_id, end_id, rid, tseq.c_str() + j, qlen, mpool, ab_band);
+      bool ab_band = win_ab[i];
+      std::vector<res_t> t_res = poa(para, DAG, beg_id, end_id, rid, tseq.c_str() + j, qlen, mpool, ab_band, ab_band ? para->b : para->win_band);
       res.insert(res.end(), t_res.begin(), t_res.end());
       j += qlen;
       for (int k = 0; k < q_span; k++, j++) {
@@ -593,10 +594,10 @@ std::vector<res_t> alignment(const para_t *para, graph *DAG, minimizer_t *mm, in
         }
       }
       beg_id = end_id;beg_qpos = j;
-      ab_band = yi & MM_SEED_BAND_MODE_MASK;
     }
     int qlen = tseq.size() - beg_qpos;
-    std::vector<res_t> t_res = poa(para, DAG, beg_id, 1, rid, tseq.c_str() + j, qlen, mpool, ab_band);
+    bool ab_band = win_ab[anchors.n];
+    std::vector<res_t> t_res = poa(para, DAG, beg_id, 1, rid, tseq.c_str() + j, qlen, mpool, ab_band, ab_band ? para->b : para->win_band);
     res.insert(res.end(), t_res.begin(), t_res.end());
   }
   else {
@@ -609,11 +610,11 @@ std::vector<res_t> alignment(const para_t *para, graph *DAG, minimizer_t *mm, in
       int beg_id, end_id, start_qpos, qlen, q_span = para->k, end_qpos;
       beg_id = i == 0 ? 0 : DAG->cons_pos_to_id[(int)anchors.a[i - 1].x];
       end_id = i == n ? 1 : DAG->cons_pos_to_id[(int)anchors.a[i].x - q_span + 1];
-      ab_band = i == 0 ? 1 : (anchors.a[i - 1].y & MM_SEED_BAND_MODE_MASK);
+      bool ab_band = win_ab[i];
       end_qpos = i == n ? tseq.size() : (int)anchors.a[i].y - q_span + 1;
       start_qpos = i == 0 ? 0 : (int)anchors.a[i - 1].y + 1;
       qlen = end_qpos - start_qpos;
-      std::vector<res_t> ret = poa(para, DAG, beg_id, end_id, rid, tseq.c_str() + start_qpos, qlen, &mpool[tid], ab_band);
+      std::vector<res_t> ret = poa(para, DAG, beg_id, end_id, rid, tseq.c_str() + start_qpos, qlen, &mpool[tid], ab_band, ab_band ? para->b : para->win_band);
       if (i < n) {
         for (int k = 0; k < q_span - 1; k++) {
           int end_tpos = (int)anchors.a[i].x - q_span + 1;

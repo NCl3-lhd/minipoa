@@ -1,8 +1,6 @@
 #ifndef MMPRIV_H
 #define MMPRIV_H
 
-#define MM_SEED_BAND_MODE_MASK (1ULL<<40)	// enable the adaptive band
-
 #include <cstdint>
 #include <cstddef>
 

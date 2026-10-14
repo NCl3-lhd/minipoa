@@ -98,14 +98,15 @@ minipoa input.fasta -f 0 > output.fasta
 
 
 ### Anchor Chain Optimization & Acceleration
-`-S` : Enable anchor chain optimization. Please note that enabling this option will dynamically select between a static band and an adaptive band strategy based on the characteristics of the delineated alignment region to maintain alignment robustness.
+`-S` : Enable anchor chain optimization. The anchor chain is split into alignment windows by the cumulative diagonal drift of the anchors, i.e. `(t_i - t_s) - (q_i - q_s)` relative to the anchor `s` that starts the window:
+* A window keeps extending while every anchor stays within `--win-band` of the starting diagonal, consecutive anchors are at most `--win-band` apart, and the window is at most `--win-max` long. Such windows use a static band of width `win-band + query_length / f`.
+* When the next anchor breaks either `--win-band` condition (a large indel or a long distance between consecutive anchors), the step to it becomes its own window with the adaptive band.
 
-`-W` : Adjust the window distance  parameter for anchors.
-* **Recommended Range**: Values between `500` and `query_length / 24` are generally appropriate.
-* **Default Behavior**: To prevent incorrect alignments caused by false-positive anchors, the software conservatively defaults to the maximum value in this range.
-* **Performance Tuning**: If you want to further accelerate the alignment process, you can manually specify a smaller `-W` value. This will increase speed, though it may result in a very slight loss of accuracy.
+`--win-band` : Maximum cumulative drift within a window, also the base band width of static windows (default `500`).
+
+`--win-max` : Maximum window length (default `10000`).
 ```bash
-minipoa input.fasta -S -W 500 -t thread > output.fasta
+minipoa input.fasta -S --win-band 500 --win-max 10000 -t thread > output.fasta
 ```
 
 ## Contact

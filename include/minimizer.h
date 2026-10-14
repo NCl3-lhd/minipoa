@@ -28,8 +28,8 @@ struct minimizer_t {
   mm128_t find_mm(int rid, int tarPos) const;
   mm128_t match_mm(uint64_t mm_x, int rid) const;
   int collect_anchors(mm128_v* anchors, int qlen, int max_occ, const int* tcov, const int* qcov);
-  int dp_chaining(const para_t* para, mm128_v* anchors, int tlen, int qlen);
-  mm128_v collect_anchors_bytseq(const para_t* para, int qid, const char* qseq, int qlen, int tid, const char* tseq, int tlen);
+  int dp_chaining(const para_t* para, mm128_v* anchors, int tlen, int qlen, std::vector<bool>* win_ab);
+  mm128_v collect_anchors_bytseq(const para_t* para, int qid, const char* qseq, int qlen, int tid, const char* tseq, int tlen, std::vector<bool>* win_ab);
   // int collect_anchors(void* km, mm128_v* anchors, mm128_v mm, int* mm_c, int tid, int qid, int qlen, int k);
 };
 // std::vector<sequence> readFile(const char* path);

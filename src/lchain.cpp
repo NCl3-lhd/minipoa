@@ -3,6 +3,7 @@
 #include "cstring"
 #include "kvec.h"
 #include <iostream>
+#include <algorithm>
 /* modified from lh3/minimap2/lchain.c */
 /********** start *************/
 constexpr int INF = 1e9;
@@ -266,7 +267,7 @@ inline int get_local_chain_score(int end_tpos_j, int end_qpos_j, int start_ancho
 // local chains:
 //   x: strand | end_tpos | end_qpos
 //   y: start_anchor_i | end_anchor_i   [start_anchor_i, end_anchor_i)
-int chain_dp(void *km, mm128_t *lchains, int n_lchains, mm128_v *_anchors, int min_w, int tlen, int qlen, int max_dist_x, int max_dist_y, int bw, float chn_pen_gap, float chn_pen_skip, int is_cdna, int n_seg) {
+int chain_dp(void *km, mm128_t *lchains, int n_lchains, mm128_v *_anchors, int max_dist_x, int max_dist_y, int bw, float chn_pen_gap, float chn_pen_skip, int is_cdna, int n_seg) {
   size_t n = _anchors->n;
 
   mm128_t *a = _anchors->a;
@@ -322,9 +323,7 @@ int chain_dp(void *km, mm128_t *lchains, int n_lchains, mm128_v *_anchors, int m
   // collect anchors based on global_max_i
   int cur_i = global_max_i, pre_i = pre_chain[global_max_i];
   uint64_t cur_y = lchains[cur_i].y, pre_x, pre_y;
-  int last_tpos = tlen, last_qpos = qlen;
   int i = (uint32_t)cur_y - 1;
-  int filter_num = 0;
   while (pre_i != -1) { // collect valid anchors in local_chains[cur_i], constrained by local_chains[pre_i]
     pre_x = lchains[pre_i].x, pre_y = lchains[pre_i].y;
 
@@ -334,18 +333,7 @@ int chain_dp(void *km, mm128_t *lchains, int n_lchains, mm128_v *_anchors, int m
       int cur_tpos = a[i].x, cur_qpos = (int32_t)a[i].y;
 
       if (cur_tpos > pre_end_tpos && cur_qpos > pre_end_qpos) {
-        filter_num++;
-        int dt = last_tpos - cur_tpos, dq = last_qpos - cur_qpos;
-        if (dt >= min_w && dq >= min_w) {
-          int dg = dt < dq ? dq - dt : dt - dq;
-          // std::cerr << filter_num << " " << std::max(dt, dq) / 40 << " " << 6 * (100 + dq / 40) << " " << std::min(dt, dq) << "\n";
-          if (filter_num < std::max(dt, dq) / 40 || 6 * (100 + dq / 40) < std::min(dt, dq)) {  // add flag
-            a[i].y |= MM_SEED_BAND_MODE_MASK;// [cur_tpos, last_tpos] reg can used static band
-          }
-          filter_num = 0;
-          kv_push(mm128_t, km, anchors, a[i]);
-          last_tpos = cur_tpos, last_qpos = cur_qpos;
-        }
+        kv_push(mm128_t, km, anchors, a[i]);
       }
       else break;
       i--;
@@ -357,19 +345,7 @@ int chain_dp(void *km, mm128_t *lchains, int n_lchains, mm128_v *_anchors, int m
   // collect anchors of last chain: local_chains[cur_i]
   // pre_end_tpos = (pre_x >> 32) & 0x7fffffff, pre_end_qpos = (int32_t)pre_x;
   while (i >= 0) {
-    int cur_tpos = a[i].x, cur_qpos = (int32_t)a[i].y;
-    filter_num++;
-    int dt = last_tpos - cur_tpos, dq = last_qpos - cur_qpos;
-    if (dt >= min_w && dq >= min_w) {
-      int dg = dt < dq ? dq - dt : dt - dq;
-      // std::cerr << filter_num << " " << std::max(dt, dq) / 40 << " " << 6 * (100 + dq / 40) << " " << std::min(dt, dq) << "\n";
-      if (filter_num < std::max(dt, dq) / 40 || 6 * (100 + dq / 40) < std::min(dt, dq)) {  // add flag
-        a[i].y |= MM_SEED_BAND_MODE_MASK;
-      }
-      filter_num = 0;
-      kv_push(mm128_t, km, anchors, a[i]);
-      last_tpos = cur_tpos, last_qpos = cur_qpos;
-    }
+    kv_push(mm128_t, km, anchors, a[i]);
     if (i == (cur_y >> 32)) break;
     i--;
   }
@@ -394,3 +370,51 @@ int chain_dp(void *km, mm128_t *lchains, int n_lchains, mm128_v *_anchors, int m
   return 0;
 }
 /************ end *************/
+
+// 按累计漂移划分 POA 窗口（参照 k-band 分段）
+//   锚点对角线 d = t - q；以窗口起点锚点 s 为基准，累计漂移 (t_i - t_s) - (q_i - q_s) = d_i - d_s，
+//   带符号累计，插入与缺失可相互抵消。
+//   从 s 往后逐个检查 |d_i - d_s| <= max_drift、与前一锚点的距离 <= max_drift、窗口长度 max(gt, gq) <= max_win，
+//   首次越界即停止，取最远的不与 s 重叠的合格锚点作为窗口终点，该窗口用静态带；
+//   相邻锚点之间可能藏着相互抵消的插入与缺失，锚点处看不到其偏移，最大可达两锚点的距离，
+//   因此距离超过 max_drift 与漂移越界同样处理。
+//   若第一个候选就越界，则以下一个不与 s 重叠的锚点强制成窗：漂移越界或距离超过 max_drift 用自适应带。
+// 输入：链上全部锚点（t 升序）；输出：anchors 原地压缩为窗口边界锚点，
+//   win_ab[i] 表示以第 i 个边界锚点为终点的窗口是否用自适应带，win_ab[n] 为尾窗口。
+// 索引 -1 为虚拟起点 V0（te = qe = -1），n 为虚拟终点 Vend（ts = tlen, qs = qlen）。
+void partition_windows(mm128_v *anchors, int tlen, int qlen, int max_drift, int max_win, std::vector<bool> *win_ab) {
+  mm128_t *a = anchors->a;
+  int n = anchors->n;
+  auto te = [&](int i) -> int64_t { return i < 0 ? -1 : (int32_t)a[i].x; };
+  auto qe = [&](int i) -> int64_t { return i < 0 ? -1 : (int32_t)a[i].y; };
+  auto ts = [&](int i) -> int64_t { return i == n ? tlen : te(i) - (int)(a[i].y >> 32 & 0xff) + 1; };
+  auto qs = [&](int i) -> int64_t { return i == n ? qlen : qe(i) - (int)(a[i].y >> 32 & 0xff) + 1; };
+  auto diag = [&](int i) -> int64_t { return i < 0 ? 0 : i == n ? (int64_t)tlen - qlen : te(i) - qe(i); };
+
+  win_ab->clear();
+  int m = 0;  // 已选出的边界锚点数
+  for (int s = -1; s < n;) {
+    int64_t ds = diag(s);
+    int e = -2;  // -2 表示没有合格锚点
+    for (int i = s + 1; i <= n; i++) {
+      int64_t gt = ts(i) - te(s) - 1, gq = qs(i) - qe(s) - 1;
+      int64_t drift = diag(i) - ds;
+      int64_t gap = std::max(ts(i) - te(i - 1) - 1, qs(i) - qe(i - 1) - 1);  // 与前一锚点的距离（参考/query 两侧取大）
+      if (drift > max_drift || drift < -max_drift || gap > max_drift || std::max(gt, gq) > max_win) break;
+      if (gt >= 0 && gq >= 0) e = i;
+    }
+    bool ab = false;
+    if (e == -2) {  // 强制单步窗口：跳到下一个不重叠锚点（Vend 必然满足）
+      for (e = s + 1; e < n; e++) {
+        if (ts(e) - te(s) - 1 >= 0 && qs(e) - qe(s) - 1 >= 0) break;
+      }
+      int64_t drift = diag(e) - ds;
+      int64_t gap = std::max(ts(e) - te(s) - 1, qs(e) - qe(s) - 1);
+      ab = drift > max_drift || drift < -max_drift || gap > max_drift;
+    }
+    win_ab->push_back(ab);
+    if (e < n) a[m++] = a[e];
+    s = e;
+  }
+  anchors->n = m;
+}

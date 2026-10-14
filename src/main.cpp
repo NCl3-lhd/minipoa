@@ -26,7 +26,8 @@ int main(int argc, char **argv) {
     ("f,band_f", "band expansion factor (smaller = wider band)", cxxopts::value<int>()->default_value("40"))
     ("B,ab_band", "enable adaptive band", cxxopts::value<bool>()->default_value("false"))
     ("S,seeding", "enable minimizer-based seeding and anchoring", cxxopts::value<bool>()->default_value("false"))
-    ("W,poa_w", "the minimum distance between adjacent anchors", cxxopts::value<int>()->default_value("20000"))
+    ("win-band", "window split: max cumulative diagonal drift within a window, also the base band width of static windows", cxxopts::value<int>()->default_value("500"))
+    ("win-max", "window split: max window length", cxxopts::value<int>()->default_value("10000"))
     ("k,k_mer", "k-mer length", cxxopts::value<int>()->default_value("19")) //19
     ("w,mm_w", "minimizer window length", cxxopts::value<int>()->default_value("10"))
     ("p,progressive_poa", "enable progressive POA guide tree", cxxopts::value<bool>()->default_value("false"))
@@ -62,9 +63,6 @@ int main(int argc, char **argv) {
       para->mat_fp = result["mat_fp"].as<std::string>();
     if (result.count("inc_fp"))
       para->inc_fp = result["inc_fp"].as<std::string>();
-    para->poa_w = 0;
-    if (result.count("poa_w"))
-      para->poa_w = result["poa_w"].as<int>();
     para->match = result["match"].as<int>();
     para->mismatch = result["mismatch"].as<int>();
     para->gap_open1 = result["gap_open"].as<int>();
@@ -79,6 +77,8 @@ int main(int argc, char **argv) {
     para->mm_filter_ratio = result["mm-filter-ratio"].as<float>();
     para->max_occ = result["max-occ"].as<int>();
     para->tr_dist = result["tr-dist"].as<int>();
+    para->win_band = result["win-band"].as<int>();
+    para->win_max = result["win-max"].as<int>();
     para->enable_seeding = result["seeding"].as<bool>();
     para->thread = result["thread"].as<int>();
     para->result = result["result"].as<int>();

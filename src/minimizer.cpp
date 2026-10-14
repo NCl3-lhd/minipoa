@@ -526,10 +526,8 @@ mm128_t minimizer_t::match_mm(uint64_t mm_x, int rid) const {
   return sorted_mm_v.a[l];
 };
 
-int minimizer_t::dp_chaining(const para_t* para, mm128_v* anchors, int tlen, int qlen) {
+int minimizer_t::dp_chaining(const para_t* para, mm128_v* anchors, int tlen, int qlen, std::vector<bool>* win_ab) {
   // mg_lchain_dp
-  int min_w = std::min(20000, std::max((tlen + 24 - 1) / 24, 500));
-  if (para->poa_w) min_w = std::min(min_w, para->poa_w + para->k);
   int max_bw = para->bw, max_dis = max_bw, max_skip_anchors = 25, max_non_best_anchors = 50, min_local_chain_cnt = 3, min_local_chain_score = 100;
   float chn_pen_gap = 0.01 * para->k, chn_pen_skip = 0.0 * 0.01 * para->k;
   int n_lchains;
@@ -564,13 +562,19 @@ int minimizer_t::dp_chaining(const para_t* para, mm128_v* anchors, int tlen, int
 
   // find bug
 
-  chain_dp(km, lchains, n_lchains, anchors, min_w, tlen, qlen, max_dis, max_dis, max_bw, chn_pen_gap, chn_pen_skip, 0, 1);
+  chain_dp(km, lchains, n_lchains, anchors, max_dis, max_dis, max_bw, chn_pen_gap, chn_pen_skip, 0, 1);
   if (para->verbose >= 2) std::cerr << "after chain_dp anchor size:" << anchors->n << "\n";
+  partition_windows(anchors, tlen, qlen, para->win_band, para->win_max, win_ab);
+  if (para->verbose >= 2) {
+    int n_ab = 0;
+    for (bool ab : *win_ab) n_ab += ab;
+    std::cerr << "windows:" << win_ab->size() << " adaptive:" << n_ab << "\n";
+  }
   kfree(km, lchains);
   return 0;
 }
 
-mm128_v minimizer_t::collect_anchors_bytseq(const para_t* para, int qid, const char* qseq, int qlen, int tid, const char* tseq, int tlen) {
+mm128_v minimizer_t::collect_anchors_bytseq(const para_t* para, int qid, const char* qseq, int qlen, int tid, const char* tseq, int tlen, std::vector<bool>* win_ab) {
   // collect cons 's minimizer
   if (para->verbose >= 2) std::cerr << "collect tseq and "<< qid <<" qseq's minimizer" << "\n";
   int n = seqs_size; // cons 's rid
@@ -624,7 +628,7 @@ mm128_v minimizer_t::collect_anchors_bytseq(const para_t* para, int qid, const c
   //   std::cerr << "\n";
   // }
   if (para->verbose >= 2) std::cerr << "get a optimal chain through dp" << "\n";
-  dp_chaining(para, &anchors, tlen, qlen);
+  dp_chaining(para, &anchors, tlen, qlen, win_ab);
   // if (para->verbose) {
   //   std::cerr << tlen << "\n";
   //   for (int i = 0; i < anchors.n; i++) {

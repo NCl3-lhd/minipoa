@@ -9,3 +9,4 @@ conda
 test.sh
 .cache
 .DS_Store
+docs/
