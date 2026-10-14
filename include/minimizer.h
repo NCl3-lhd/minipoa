@@ -6,6 +6,7 @@
 #include "mmpriv.h"
 
 void mm_sketch(void* km, const char* str, int len, int w, int k, uint32_t rid, int is_hpc, mm128_v* p);
+std::vector<std::pair<int, int>> tr_intervals(const mm128_v* mm, int len, int k, int max_dist, int merge_gap);
 struct minimizer_t {
   void* km;
   size_t seqs_size;
@@ -26,7 +27,7 @@ struct minimizer_t {
   mm128_t find_mm(int& idx, int rid, int tarPos) const;
   mm128_t find_mm(int rid, int tarPos) const;
   mm128_t match_mm(uint64_t mm_x, int rid) const;
-  int collect_anchors(mm128_v* anchors, int qlen);
+  int collect_anchors(mm128_v* anchors, int qlen, int max_occ, const int* tcov, const int* qcov);
   int dp_chaining(const para_t* para, mm128_v* anchors, int tlen, int qlen);
   mm128_v collect_anchors_bytseq(const para_t* para, int qid, const char* qseq, int qlen, int tid, const char* tseq, int tlen);
   // int collect_anchors(void* km, mm128_v* anchors, mm128_v mm, int* mm_c, int tid, int qid, int qlen, int k);

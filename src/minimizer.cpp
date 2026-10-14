@@ -5,6 +5,8 @@
 #include "sequence.h"
 #include "kvec.h"
 #include <numeric>
+#include <algorithm>
+#include <unordered_map>
 #include "lchain.h"
 /* modified from lh3/minimap2/sketch.c */
 /********** start *************/
@@ -134,6 +136,42 @@ void mm_sketch(void* km, const char* str, int len, int w, int k, uint32_t rid, i
     kv_push(mm128_t, km, *p, min);
 }
 /************ end *************/
+
+/*
+  串联重复区间：同一 minimizer 在 max_dist 内再次出现即视为周期 p（两次结束位置之差）的串联重复，
+  区间取 [首次出现起点 - p, 再次出现终点 + p]，相距不超过 merge_gap 的区间合并。
+  mm 需按位置排序（mm_sketch 的输出即是）；返回按起点排序的半开区间。
+*/
+std::vector<std::pair<int, int>> tr_intervals(const mm128_v* mm, int len, int k, int max_dist, int merge_gap) {
+  std::vector<std::pair<int, int>> iv, res;
+  std::unordered_map<uint64_t, int> last; // minimizer -> 上一次出现的结束位置
+  last.reserve(mm->n);
+  for (size_t j = 0; j < mm->n; ++j) {
+    int ej = (uint32_t)mm->a[j].y >> 1;
+    auto it = last.find(mm->a[j].x);
+    if (it != last.end()) {
+      int p = ej - it->second;
+      if (p > 0 && p <= max_dist) iv.emplace_back(std::max(0, ej - p - k + 1 - p), std::min(len, ej + 1 + p));
+      it->second = ej;
+    }
+    else last.emplace(mm->a[j].x, ej);
+  }
+  std::sort(iv.begin(), iv.end());
+  for (const auto& v : iv) {
+    if (!res.empty() && v.first <= res.back().second + merge_gap) res.back().second = std::max(res.back().second, v.second);
+    else res.push_back(v);
+  }
+  return res;
+}
+
+// 串联重复区间的前缀和：cov[e + 1] - cov[s] > 0 表示 [s, e] 与区间相交
+static std::vector<int> tr_cov(const mm128_v* mm, int len, int k, int max_dist) {
+  std::vector<int> cov(len + 1, 0);
+  for (const auto& v : tr_intervals(mm, len, k, max_dist, 50))
+    for (int i = v.first; i < v.second; ++i) cov[i + 1] = 1;
+  for (int i = 0; i < len; ++i) cov[i + 1] += cov[i];
+  return cov;
+}
 
 /* modified from yangao07/abPOA/abpoa_seed.c */
 #define sort_key_mm128x(a) ((a).x)
@@ -387,11 +425,19 @@ minimizer_t::~minimizer_t() {
   a[].x: rev<<63 | tid<<32 | tpos
   a[].y: qid << 48 | flags<<40 | q_span<<32 | qpos
 */
-int minimizer_t::collect_anchors(mm128_v* anchors, int qlen) {
+int minimizer_t::collect_anchors(mm128_v* anchors, int qlen, int max_occ, const int* tcov, const int* qcov) {
   int i = 0, j = 0, _i, _j;
   while (i < sorted_tmm_v.n && j < sorted_qmm_v.n) {
     uint64_t xi = sorted_tmm_v.a[i].x, xj = sorted_qmm_v.a[j].x;
     if (xi == xj) {
+      // 重复 minimizer（如串联重复内）可沿相差整数个重复单元的多条对角线配对，锚点位置有偶然性，直接跳过
+      int i_end = i, j_end = j;
+      while (i_end < sorted_tmm_v.n && sorted_tmm_v.a[i_end].x == xi) ++i_end;
+      while (j_end < sorted_qmm_v.n && sorted_qmm_v.a[j_end].x == xj) ++j_end;
+      if (max_occ > 0 && (i_end - i > max_occ || j_end - j > max_occ)) {
+        i = i_end, j = j_end;
+        continue;
+      }
       int _i = i;
       for (; _i < sorted_tmm_v.n; ++_i) {
         uint64_t _xi = sorted_tmm_v.a[_i].x;
@@ -404,6 +450,10 @@ int minimizer_t::collect_anchors(mm128_v* anchors, int qlen) {
           // t_strand<<63 | t_lastPos<<32 | q_lastPos
           mm128_t anchor;
           uint32_t qspan = _xj & 0xff;
+          // 与共识或 query 上的串联重复区间相交的锚点不生成，让分段跨过整个重复区
+          int te = (uint32_t)_yi >> 1, qe = (uint32_t)_yj >> 1;
+          if (tcov && tcov[te + 1] - tcov[te + 1 - qspan] > 0) continue;
+          if (qcov && qcov[qe + 1] - qcov[qe + 1 - qspan] > 0) continue;
           if ((_yi & 1) == (_yj & 1)) { // same strand
             // p->x = (r & 0xffffffff00000000ULL) | rpos;
             // p->y = (uint64_t)q->q_span << 32 | q->q_pos >> 1;
@@ -554,7 +604,12 @@ mm128_v minimizer_t::collect_anchors_bytseq(const para_t* para, int qid, const c
   // collect anchor between _seq and cons
   // if (para->verbose) std::cerr << "collect anchor between cons and qseq" << "\n";
   mm128_v anchors = { 0, 0, 0 };
-  collect_anchors(&anchors, qlen);
+  std::vector<int> tcov, qcov;
+  if (para->tr_dist > 0) {
+    tcov = tr_cov(&tmm_v, tlen, para->k, para->tr_dist);
+    qcov = tr_cov(&qmm_v, qlen, para->k, para->tr_dist);
+  }
+  collect_anchors(&anchors, qlen, para->max_occ, tcov.empty() ? nullptr : tcov.data(), qcov.empty() ? nullptr : qcov.data());
   // if (qid == 205) {
   //   std::cerr << "target pos: ";
   //   for (int i = 0; i < anchors.n; i++) {

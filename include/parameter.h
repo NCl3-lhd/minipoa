@@ -11,6 +11,8 @@ struct para_t {
   bool ab_band;
   int k, mm_w;// k-mer
   float mm_filter_ratio;
+  int max_occ; // 锚点 minimizer 在共识或 query 中的最大出现次数，0 不过滤
+  int tr_dist; // 串联重复检测：同一 minimizer 再次出现的最大距离，0 不检测
   bool enable_seeding;
   int bw, poa_w;
   bool progressive_poa;

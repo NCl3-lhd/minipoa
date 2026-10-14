@@ -35,6 +35,8 @@ int main(int argc, char **argv) {
     ("h,help", "Print usage")
     ("v,version", "Print version")
     ("mm-filter-ratio", "minimizer filter ratio for guide tree construction", cxxopts::value<float>()->default_value("0.25"))
+    ("max-occ", "skip anchor minimizers occurring more than INT times in the consensus or query (0: no filter)", cxxopts::value<int>()->default_value("0"))
+    ("tr-dist", "skip anchors in tandem repeats, i.e. regions where a minimizer recurs within INT bp (0: disable)", cxxopts::value<int>()->default_value("0"))
     ;
   options.parse_positional({ "input" });
   std::string path;
@@ -75,6 +77,8 @@ int main(int argc, char **argv) {
     para->bw = 1000;
     para->progressive_poa = result["progressive_poa"].as<bool>();
     para->mm_filter_ratio = result["mm-filter-ratio"].as<float>();
+    para->max_occ = result["max-occ"].as<int>();
+    para->tr_dist = result["tr-dist"].as<int>();
     para->enable_seeding = result["seeding"].as<bool>();
     para->thread = result["thread"].as<int>();
     para->result = result["result"].as<int>();
