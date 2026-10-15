@@ -27,7 +27,7 @@ int main(int argc, char **argv) {
     ("B,ab_band", "enable adaptive band", cxxopts::value<bool>()->default_value("false"))
     ("S,seeding", "enable minimizer-based seeding and anchoring", cxxopts::value<bool>()->default_value("false"))
     ("win-band", "window split: max cumulative diagonal drift within a window, also the base band width of static windows", cxxopts::value<int>()->default_value("500"))
-    ("win-max", "window split: max window length", cxxopts::value<int>()->default_value("10000"))
+    ("win-max", "window split: upper bound of the window length, actual limit is min(INT, max(500, query_len / 25))", cxxopts::value<int>()->default_value("10000"))
     ("k,k_mer", "k-mer length", cxxopts::value<int>()->default_value("19")) //19
     ("w,mm_w", "minimizer window length", cxxopts::value<int>()->default_value("10"))
     ("p,progressive_poa", "enable progressive POA guide tree", cxxopts::value<bool>()->default_value("false"))
@@ -37,7 +37,7 @@ int main(int argc, char **argv) {
     ("v,version", "Print version")
     ("mm-filter-ratio", "minimizer filter ratio for guide tree construction", cxxopts::value<float>()->default_value("0.25"))
     ("max-occ", "skip anchor minimizers occurring more than INT times in the consensus or query (0: no filter)", cxxopts::value<int>()->default_value("0"))
-    ("tr-dist", "skip anchors in tandem repeats, i.e. regions where a minimizer recurs within INT bp (0: disable)", cxxopts::value<int>()->default_value("0"))
+    ("tr-dist", "skip anchors in tandem repeats, i.e. regions where a minimizer recurs within INT bp (0: disable)", cxxopts::value<int>()->default_value("1000"))
     ;
   options.parse_positional({ "input" });
   std::string path;
@@ -50,7 +50,7 @@ int main(int argc, char **argv) {
       return 0;
     }
     if (result.count("version")) {
-      std::cout << "minipoa version 1.4.3" << std::endl;
+      std::cout << "minipoa version 1.5.3" << std::endl;
       return 0;
     }
     if (result.count("input") == 0) {

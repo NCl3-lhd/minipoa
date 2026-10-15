@@ -140,11 +140,13 @@ void mm_sketch(void* km, const char* str, int len, int w, int k, uint32_t rid, i
 /*
   串联重复区间：同一 minimizer 在 max_dist 内再次出现即视为周期 p（两次结束位置之差）的串联重复，
   区间取 [首次出现起点 - p, 再次出现终点 + p]，相距不超过 merge_gap 的区间合并。
-  mm 需按位置排序（mm_sketch 的输出即是）；返回按起点排序的半开区间。
+  mm 需按位置排序（mm_sketch 的输出即是）；结果为按起点排序的半开区间，写入 iv。
+  last、iv 由调用方持有以复用内存，进入时会被清空。
 */
-std::vector<std::pair<int, int>> tr_intervals(const mm128_v* mm, int len, int k, int max_dist, int merge_gap) {
-  std::vector<std::pair<int, int>> iv, res;
-  std::unordered_map<uint64_t, int> last; // minimizer -> 上一次出现的结束位置
+void tr_intervals(const mm128_v* mm, int len, int k, int max_dist, int merge_gap,
+                  std::unordered_map<uint64_t, int>& last, std::vector<std::pair<int, int>>& iv) {
+  last.clear(); // minimizer -> 上一次出现的结束位置
+  iv.clear();
   last.reserve(mm->n);
   for (size_t j = 0; j < mm->n; ++j) {
     int ej = (uint32_t)mm->a[j].y >> 1;
@@ -157,20 +159,23 @@ std::vector<std::pair<int, int>> tr_intervals(const mm128_v* mm, int len, int k,
     else last.emplace(mm->a[j].x, ej);
   }
   std::sort(iv.begin(), iv.end());
-  for (const auto& v : iv) {
-    if (!res.empty() && v.first <= res.back().second + merge_gap) res.back().second = std::max(res.back().second, v.second);
-    else res.push_back(v);
+  // 原地合并：iv[0, w) 为已合并的区间
+  size_t w = 0;
+  for (size_t i = 0; i < iv.size(); ++i) {
+    if (w > 0 && iv[i].first <= iv[w - 1].second + merge_gap) iv[w - 1].second = std::max(iv[w - 1].second, iv[i].second);
+    else iv[w++] = iv[i];
   }
-  return res;
+  iv.resize(w);
 }
 
 // 串联重复区间的前缀和：cov[e + 1] - cov[s] > 0 表示 [s, e] 与区间相交
-static std::vector<int> tr_cov(const mm128_v* mm, int len, int k, int max_dist) {
-  std::vector<int> cov(len + 1, 0);
-  for (const auto& v : tr_intervals(mm, len, k, max_dist, 50))
+static void tr_cov(const mm128_v* mm, int len, int k, int max_dist, std::vector<int>& cov,
+                   std::unordered_map<uint64_t, int>& last, std::vector<std::pair<int, int>>& iv) {
+  cov.assign(len + 1, 0);
+  tr_intervals(mm, len, k, max_dist, 50, last, iv);
+  for (const auto& v : iv)
     for (int i = v.first; i < v.second; ++i) cov[i + 1] = 1;
   for (int i = 0; i < len; ++i) cov[i + 1] += cov[i];
-  return cov;
 }
 
 /* modified from yangao07/abPOA/abpoa_seed.c */
@@ -564,7 +569,9 @@ int minimizer_t::dp_chaining(const para_t* para, mm128_v* anchors, int tlen, int
 
   chain_dp(km, lchains, n_lchains, anchors, max_dis, max_dis, max_bw, chn_pen_gap, chn_pen_skip, 0, 1);
   if (para->verbose >= 2) std::cerr << "after chain_dp anchor size:" << anchors->n << "\n";
-  partition_windows(anchors, tlen, qlen, para->win_band, para->win_max, win_ab);
+  // 最大窗口长度随查询序列长度缩放：max(500, qlen / 25)，且不超过 --win-max
+  int max_win = std::min(para->win_max, std::max(500, qlen / 25));
+  partition_windows(anchors, tlen, qlen, para->win_band, max_win, win_ab);
   if (para->verbose >= 2) {
     int n_ab = 0;
     for (bool ab : *win_ab) n_ab += ab;
@@ -608,12 +615,12 @@ mm128_v minimizer_t::collect_anchors_bytseq(const para_t* para, int qid, const c
   // collect anchor between _seq and cons
   // if (para->verbose) std::cerr << "collect anchor between cons and qseq" << "\n";
   mm128_v anchors = { 0, 0, 0 };
-  std::vector<int> tcov, qcov;
-  if (para->tr_dist > 0) {
-    tcov = tr_cov(&tmm_v, tlen, para->k, para->tr_dist);
-    qcov = tr_cov(&qmm_v, qlen, para->k, para->tr_dist);
+  bool use_tr = para->tr_dist > 0;
+  if (use_tr) {
+    tr_cov(&tmm_v, tlen, para->k, para->tr_dist, tcov, tr_last, tr_iv);
+    tr_cov(&qmm_v, qlen, para->k, para->tr_dist, qcov, tr_last, tr_iv);
   }
-  collect_anchors(&anchors, qlen, para->max_occ, tcov.empty() ? nullptr : tcov.data(), qcov.empty() ? nullptr : qcov.data());
+  collect_anchors(&anchors, qlen, para->max_occ, use_tr ? tcov.data() : nullptr, use_tr ? qcov.data() : nullptr);
   // if (qid == 205) {
   //   std::cerr << "target pos: ";
   //   for (int i = 0; i < anchors.n; i++) {

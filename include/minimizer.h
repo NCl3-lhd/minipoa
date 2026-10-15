@@ -1,12 +1,14 @@
 #ifndef MINIMIZER_H
 #define MINIMIZER_H
+#include <unordered_map>
 #include "parameter.h"
 #include "sequence.h"
 #include "ksort.h"
 #include "mmpriv.h"
 
 void mm_sketch(void* km, const char* str, int len, int w, int k, uint32_t rid, int is_hpc, mm128_v* p);
-std::vector<std::pair<int, int>> tr_intervals(const mm128_v* mm, int len, int k, int max_dist, int merge_gap);
+void tr_intervals(const mm128_v* mm, int len, int k, int max_dist, int merge_gap,
+                  std::unordered_map<uint64_t, int>& last, std::vector<std::pair<int, int>>& iv);
 struct minimizer_t {
   void* km;
   size_t seqs_size;
@@ -15,6 +17,11 @@ struct minimizer_t {
   int* mm_h;
   mm128_v mm_v, sorted_mm_v;
   mm128_v tmm_v, sorted_tmm_v, qmm_v, sorted_qmm_v;
+  // 以下为 collect_anchors_bytseq 中串联重复过滤的工作缓冲区，仅在 para->tr_dist > 0 时使用；
+  // 作为成员跨调用复用内存，内容只在单次调用内有效
+  std::vector<int> tcov, qcov; // tseq/qseq 上串联重复区的前缀和，长度 len + 1；cov[e + 1] - cov[s] > 0 表示 [s, e] 与重复区相交
+  std::unordered_map<uint64_t, int> tr_last; // tr_intervals 临时表：minimizer 哈希 -> 上一次出现的结束位置
+  std::vector<std::pair<int, int>> tr_iv; // tr_intervals 输出：合并后的串联重复半开区间 [s, e)，按起点排序
   std::vector<int> max_sim; // is seq_id;
   std::vector<int> ord; // index is rid
   std::vector<int> rid_to_ord; // index is ord rid -> ord

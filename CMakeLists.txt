@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.9)
 
-project(minipoa VERSION 1.4.2
+project(minipoa VERSION 1.5.3
     LANGUAGES C CXX
     DESCRIPTION "Minipoa: A minimizer-based method for fast and memory-efficient partial order alignment.")
 
