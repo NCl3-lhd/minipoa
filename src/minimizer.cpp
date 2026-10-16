@@ -262,6 +262,10 @@ void minimizer_t::get_guide_tree(para_t* para) {
     // 1: 0 1
     // 2: 0 1 2
     int* mm_hit_n = (int*)calloc((seqs_size * (seqs_size + 1)) >> 1, sizeof(int)); //  ...
+    if (mm_hit_n == nullptr) {
+      std::cerr << __func__ << ": fail to allocate mm_hit_n for " << seqs_size << " sequences (out of memory)" << "\n";
+      exit(EXIT_FAILURE);
+    }
     // n: 0 1 ... n-1 n
     // 
     // # total mimizers of i: mm_hit_n[(i*(i+1))/2+i]
@@ -296,13 +300,13 @@ void minimizer_t::get_guide_tree(para_t* para) {
         for (size_t k1 = 0; k1 < present_rids.size(); ++k1) {
           rid1 = present_rids[k1];
           // 处理 self-hit
-          mm_hit_n[((rid1 * (rid1 + 1)) >> 1) + rid1] += mm_cnt[rid1];
+          mm_hit_n[(((size_t)rid1 * (rid1 + 1)) >> 1) + rid1] += mm_cnt[rid1];
 
           for (size_t k2 = k1 + 1; k2 < present_rids.size(); ++k2) {
             rid2 = present_rids[k2];
             int max_r = std::max(rid1, rid2);
             int min_r = std::min(rid1, rid2);
-            mm_hit_n[((max_r * (max_r + 1)) >> 1) + min_r] += std::min(mm_cnt[rid1], mm_cnt[rid2]);
+            mm_hit_n[(((size_t)max_r * (max_r + 1)) >> 1) + min_r] += std::min(mm_cnt[rid1], mm_cnt[rid2]);
           }
         }
 
@@ -318,6 +322,10 @@ void minimizer_t::get_guide_tree(para_t* para) {
 
     // calculate jaccard similarity between each two sequences
     double *jac_sim = (double *)calloc((seqs_size * seqs_size), sizeof(double));
+    if (jac_sim == nullptr) {
+      std::cerr << __func__ << ": fail to allocate jac_sim for " << seqs_size << " sequences (out of memory)" << "\n";
+      exit(EXIT_FAILURE);
+    }
     double max_jac = -1.0, jac; int max_i = -1, max_j = -1;
     for (i = 0; i < (size_t)seqs_size; ++i) {
       for (j = 0; j < (size_t)seqs_size; ++j) {
